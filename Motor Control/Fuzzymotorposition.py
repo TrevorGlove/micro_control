@@ -1,142 +1,142 @@
 """
 @TrevorGlove https://github.com/TrevorGlove/motor_control
-Elaborado with Raspberry Pi Pico
+Developed with Raspberry Pi Pico
 """
 
 from machine import Pin, ADC, Timer
 from L298N import L298N
 from FuzzyLib import Fuzzy, Cut, Proyect, Defuzzy
 
-# -----Declaración de pines----
+# -----Pin Declarations----
 
-# L298N y encoder
+# L298N and encoder
 Pin_L298N = {'IN2': 6, 'IN1': 7, 'ENA': 8}
 Pin_Encoder = {'A': 4, 'B': 5}
 
-# Pin Serial ADC
+# Serial ADC Pin
 PinSerial = 28
 
-# -----Declaración de variables----
+# -----Variable Declarations----
 
-contador = 0   # Pulsos de encoder (para velocidad)
-contadorp = 0  # Pulsos de encodor (para posición)
-pv = 486       # Total de pulsos por vuelta
+counter = 0     # Encoder pulses (for speed)
+counter_p = 0   # Encoder pulses (for position)
+ppr = 486       # Total pulses per revolution
 
 vA1 = 0        # vA(k-1)
 vB1 = 0        # vB(k-1)
 
-dirmotor = False  # F dirección hacia atras y V dirección hacia adelante
-gr = 0         # Grados de giro del motor
+motor_dir = False  # F for backward direction and T for forward direction
+deg = 0         # Motor rotation degrees
 
 # Fuzzy
 
-x = (0, 0)  # (error, velocidad)
+x = (0, 0)  # (error, speed)
 
-e_u = (-500, 500)        # Universo de error (grados)
-v_u = (-500, 500)        # Universo de Velocidad (grados/s)
-dc_u = (-65535, 65535)   # Universo de Data cycle (bits)
+e_u = (-500, 500)        # Error universe (degrees)
+v_u = (-500, 500)        # Speed universe (degrees/s)
+dc_u = (-65535, 65535)   # Duty cycle universe (bits)
 
-# Funciones de membresía de entrada
+# Input membership functions
 
-ENL = (-500, -500, -300, -15)  # Error Negativo Lejano
-ENC = (-300, -50, 0)           # Error Negativo Cercano
-E0 = (-1, 0, 1)                # Error Cero
-EPC = (0, 50, 300)             # Error Positivo Cercano
-EPL = (15, 300, 500, 500)      # Error Positivo Lejano
+FNL = (-500, -500, -300, -15)  # Far Negative Error
+CNE = (-300, -50, 0)           # Close Negative Error
+ZE = (-1, 0, 1)                # Zero Error
+CPE = (0, 50, 300)             # Close Positive Error
+FPE = (15, 300, 500, 500)      # Far Positive Error
 
-E = [ENL, ENC, E0, EPC, EPL]
+E = [FNL, CNE, ZE, CPE, FPE]
 
-VN = (-500, -500, -100, -1)  # Velocidad Negativo
-V0 = (-2, 0, 2)              # Velocidad Cero
-VP = (1, 100, 500, 500)      # Velocidad Positivo
-V = [VN, V0, VP]
+NS = (-500, -500, -100, -1)  # Negative Speed
+ZS = (-2, 0, 2)              # Zero Speed
+PS = (1, 100, 500, 500)      # Positive Speed
+V = [NS, ZS, PS]
 
 
-# Funciones de membresía de salida
+# Output membership functions
 
-DNA = (-65535, -65535, -43690, -500)   # Data cycle Alto Negativo
-DNB = (-10000, -500, 1000)                # Data cycle Bajo Negativo
-D0 = (-500, 0, 500)                      # Data cycle Cero
-DPB = (100, 500, 10000)                  # Data cycle Bajo Positivo
-DPA = (500, 43690, 65535, 65535)       # Data cycle Alto Positivo
+HNDC = (-65535, -65535, -43690, -500)   # High Negative Duty Cycle
+LNDC = (-10000, -500, 1000)             # Low Negative Duty Cycle
+ZDC = (-500, 0, 500)                    # Zero Duty Cycle
+LPDC = (100, 500, 10000)                # Low Positive Duty Cycle
+HPDC = (500, 43690, 65535, 65535)       # High Positive Duty Cycle
 
-DC = [DNA, DNB, D0, DPB, DPA]
+DC = [HNDC, LNDC, ZDC, LPDC, HPDC]
 
-# Reglas Difusas
+# Fuzzy Rules
 
-R = [(ENL, VN, DNA),    # r1
-     (ENL, V0, DNA),    # r2
-     (ENL, VP, DNA),    # r3
-     (ENC, VN, DNB),    # r4
-     (ENC, V0, DNB),    # r5
-     (ENC, VP, DNB),    # r6
-     ( E0, VN, DPB),    # r7
-     ( E0, V0,  D0),    # r8
-     ( E0, VP, DNB),    # r9
-     (EPC, VN, DPB),    # r10
-     (EPC, V0, DPB),    # r11
-     (EPC, VP, DPB),    # r12
-     (EPL, VN, DPA),    # r13
-     (EPL, V0, DPA),    # r14
-     (EPL, VP, DPA)]    # r15
+R = [(FNL, NS, HNDC),    # r1
+     (FNL, ZS, HNDC),    # r2
+     (FNL, PS, HNDC),    # r3
+     (CNE, NS, LNDC),    # r4
+     (CNE, ZS, LNDC),    # r5
+     (CNE, PS, LNDC),    # r6
+     ( ZE, NS, LPDC),    # r7
+     ( ZE, ZS,  ZDC),    # r8
+     ( ZE, PS, LNDC),    # r9
+     (CPE, NS, LPDC),    # r10
+     (CPE, ZS, LPDC),    # r11
+     (CPE, PS, LPDC),    # r12
+     (FPE, NS, HPDC),    # r13
+     (FPE, ZS, HPDC),    # r14
+     (FPE, PS, HPDC)]    # r15
 
-# Variables de Control
+# Control Variables
 
-sp = 0     # Setpoint (grados)
-c = 0.0    # Variable de Control (bits)
-e = 0.0    # Error (grados)
+sp = 0     # Setpoint (degrees)
+c = 0.0    # Control Variable (bits)
+e = 0.0    # Error (degrees)
 Ts = 0.1
 
-# -----Definición de funciones de interrupción----
+# -----Interrupt Function Definitions----
 
-def interrupcion(pin):
-    global contador, vA, vA1, vA2, vB, dirmotor
-    vA = A.value()        # Valor de Pin A de encoder
+def interrupt(pin):
+    global counter, vA, vA1, vA2, vB, motor_dir
+    vA = A.value()        # Encoder Pin A value
     if not vA1 and vA:
-        vB = B.value()    # Valor de Pin B de encoder
-        if vB == (False and dirmotor):
-            dirmotor = False
-        elif vB == (True and (not dirmotor)):
-            dirmotor = True
+        vB = B.value()    # Encoder Pin B value
+        if vB == (False and motor_dir):
+            motor_dir = False
+        elif vB == (True and (not motor_dir)):
+            motor_dir = True
     vA1 = vA
 
-    contador += 1 if not dirmotor else -1
+    counter += 1 if not motor_dir else -1
     
 def Fuzzyficator(timer):
-    global gr, contador, pot, sp, c, e, pv, Ts, x, dc_u
+    global deg, counter, pot, sp, c, e, ppr, Ts, x, dc_u
 
-    # -----Valores para Vector de entradas------
-    gr += contador*360/pv           # Posición
-    vl = contador*360/(pv*Ts)       # Velocidad
-    contador = 0
-    sp = pot*540/65535 - 270        # Setpoint
-    e = sp - gr                     # Error
+    # -----Values for Input Vector------
+    deg += counter*360/ppr           # Position
+    vl = counter*360/(ppr*Ts)        # Speed
+    counter = 0
+    sp = pot*540/65535 - 270         # Setpoint
+    e = sp - deg                     # Error
 
     # -----Fuzzy Control------
     
-    print(("Sp", int(sp), "Gr", int(gr)))    
+    print(("Sp", int(sp), "Deg", int(deg)))    
     
-    x = (e, vl)                        # Vector de Entrada
-    Val = Fuzzy(R, x, (E, V))          # Fuzzificación
-    Lines_cut = Proyect(Val)           # Proyecciòn de valores en U. de Velocidad
-    Trapezoids = Cut(Lines_cut, Val)   # Func. de membresia cortadas
-    c = Defuzzy(Trapezoids, dc_u, 40)  # Defuzzificación
+    x = (e, vl)                        # Input Vector
+    Val = Fuzzy(R, x, (E, V))          # Fuzzification
+    Lines_cut = Proyect(Val)           # Projection of values in Speed Universe
+    Trapezoids = Cut(Lines_cut, Val)   # Clipped membership functions
+    c = Defuzzy(Trapezoids, dc_u, 40)  # Defuzzification
 
 
-# -----Configuración de pines----
+# -----Pin Configuration----
 
-# Lectura dfel ADC
+# ADC Reading
 adc = ADC(PinSerial)
 
-# Interrupción en Pin A
+# Interrupt on Pin A
 A = Pin(Pin_Encoder['A'], Pin.IN)
 B = Pin(Pin_Encoder['B'], Pin.IN)
-A.irq(trigger=Pin.IRQ_RISING, handler=interrupcion)
+A.irq(trigger=Pin.IRQ_RISING, handler=interrupt)
 
-# Control de motor
+# Motor Control
 motor1 = L298N(Pin_L298N['IN1'], Pin_L298N['IN2'], Pin_L298N['ENA'])
 
-# Interrucpión por Timer
+# Timer Interrupt
 tim = Timer()
 tim.init(period=int(Ts * 1000), mode=Timer.PERIODIC, callback=Fuzzyficator)
 
@@ -144,4 +144,3 @@ tim.init(period=int(Ts * 1000), mode=Timer.PERIODIC, callback=Fuzzyficator)
 while True:
     pot = adc.read_u16()
     motor1.speed(c)
-
